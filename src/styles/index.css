@@ -1,0 +1,65 @@
+/* 全局样式：跨组件共用的基础变量与重置，组件私有样式一律写在 .vue 的 scoped 里 */
+
+:root {
+  /* 中性色阶：底色偏暖，避免纯灰的塑料感 */
+  --ms-bg: #f6f4f1;
+  --ms-surface: #ffffff;
+  --ms-surface-soft: #efece7;
+  --ms-border: #dcd6cd;
+  --ms-text: #23211e;
+  --ms-text-muted: #6b6560;
+
+  /* 主色 + 点缀色：单一主色压住画面，点缀色只在关键动作上出现 */
+  --ms-primary: #2f5d50;
+  --ms-primary-soft: #e4ede9;
+  --ms-accent: #c2703d;
+
+  /* 缓动曲线：统一动效手感 */
+  --ms-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ms-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --ms-radius: 10px;
+  --ms-radius-lg: 16px;
+  --ms-space: 8px;
+
+  /* 字体：正文用中文系统无衬线，展示体留给具体页面单独指定 */
+  --ms-font-sans: 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Hiragino Sans GB',
+    'Source Han Sans SC', sans-serif;
+  --ms-font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ms-bg);
+  color: var(--ms-text);
+  font-family: var(--ms-font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--ms-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Element Plus 主题跟随主色变量，避免默认蓝与项目配色打架 */
+:root {
+  --el-color-primary: var(--ms-primary);
+  --el-border-radius-base: var(--ms-radius);
+  --el-font-family: var(--ms-font-sans);
+}

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // 让 IDE 认识 unplugin 自动导入的组件（<el-xxx>）与 API（ref / ElMessage 等）
+    "types": [],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "src/**/*.js",
+    "src/**/*.vue",
+    "src/types/**/*.d.ts",
+    "vite.config.js"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

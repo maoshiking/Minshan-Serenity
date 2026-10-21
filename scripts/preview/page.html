@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <title>地形预览（无头渲染用）</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #dfe9ee;
+      }
+      #stage {
+        position: relative;
+        width: 100%;
+        height: 100%;
+      }
+      #stage canvas {
+        display: block;
+      }
+      #labels {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      /* 下面这段与 TerrainMapView.vue 里的全局标记样式保持一致，
+         否则截图里的标记浮层会是没有样式的裸文字，看不出真实观感 */
+      .terrain-marker {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: auto;
+      }
+      .terrain-marker__badge {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: #c2703d;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        font-family: 'Cascadia Mono', Consolas, monospace;
+        border: 2px solid rgba(255, 255, 255, 0.92);
+        box-shadow: 0 3px 8px rgba(35, 33, 30, 0.3);
+      }
+      .terrain-marker__tip {
+        display: none;
+      }
+    </style>
+    <!-- 裸模块名交给 import map，源码里的 'three' / 'three/examples/jsm/...' 才能解析 -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/examples/jsm/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="labels"></div>
+    </div>
+
+    <script type="module">
+      import * as THREE from 'three'
+      import { createTerrainWorld } from '/src/three/cartoonTerrain.js'
+
+      const VIEWPORT = { width: 1200, height: 800 }
+      // 与真实页面同构：渲染器在容器内自适配，相机宽高比由容器决定
+      const params = new URLSearchParams(location.search)
+      const seed = Number(params.get('seed') ?? 20261021)
+      const resolution = Number(params.get('resolution') ?? 112)
+
+      const stage = document.getElementById('stage')
+      const labels = document.getElementById('labels')
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+      renderer.setPixelRatio(1)
+      renderer.setSize(VIEWPORT.width, VIEWPORT.height, true)
+      stage.insertBefore(renderer.domElement, labels)
+
+      const scene = new THREE.Scene()
+      const camera = new THREE.PerspectiveCamera(46, VIEWPORT.width / VIEWPORT.height, 0.5, 2000)
+
+      const world = createTerrainWorld({
+        scene,
+        camera,
+        renderer,
+        labelLayer: labels,
+        options: { seed, resolution },
+      })
+
+      // 找一块陆地上分散的四个点落标记，顺便把路线带出来
+      const field = world.field()
+      const picks = []
+      for (let radius = 9; radius < 54 && picks.length < 4; radius += 2) {
+        for (let angle = 0; angle < Math.PI * 2 && picks.length < 4; angle += Math.PI / 10) {
+          const x = Math.cos(angle) * radius
+          const z = Math.sin(angle) * radius
+          if (!field.plantable(x, z)) continue
+          if (picks.some((p) => Math.hypot(p.x - x, p.z - z) < 24)) continue
+          picks.push({ x, z })
+        }
+      }
+      for (const p of picks) world.addMarker(p.x, p.z)
+
+      const size = field.size
+      const views = {
+        // 默认取景：验构图、配色、地形整体形态
+        overview: () => {
+          world.resetView()
+        },
+        // 近景：验块面感、树、水岸线、飘带细节
+        closeup: () => {
+          const p = picks[0] ?? { x: 0, z: 0 }
+          const y = field.worldHeight(p.x, p.z)
+          world.controls.target.set(p.x, y, p.z)
+          camera.position.set(p.x + 26, y + 30, p.z + 38)
+        },
+        // 鸟瞰：验路线是否贴地连贯
+        route: () => {
+          world.controls.target.set(0, field.heightScale * 0.3, 0)
+          camera.position.set(size * 0.35, size * 1.25, size * 0.5)
+        },
+        // 平视：验沙盘侧壁、阴影投射方向、天空与雾的衔接
+        low: () => {
+          world.controls.target.set(0, field.heightScale * 0.1, 0)
+          camera.position.set(-size * 1.15, size * 0.28, size * 1.05)
+        },
+      }
+
+      let frameTime = 0
+
+      function renderFrames(count) {
+        // 逐帧推进，让水面、虚线、落点动画都走到稳定状态
+        for (let i = 0; i < count; i++) {
+          world.update(1 / 60, frameTime)
+          frameTime += 1 / 60
+        }
+        renderer.render(scene, camera)
+      }
+
+      window.__preview = {
+        ready: false,
+        stats: null,
+        views: Object.keys(views),
+        // 暴露渲染器，截图脚本要靠它读 draw call 数（顺带验证实例化是否真的生效）
+        renderer,
+        world,
+        setView(name) {
+          const view = views[name]
+          if (!view) throw new Error(`未知视角: ${name}`)
+          view()
+          // 相机位置是手设的，跑几帧让 OrbitControls 收敛、标签重新投影
+          renderFrames(90)
+          return name
+        },
+        renderFrames,
+        getStats: () => world.getStats(),
+      }
+
+      // 先跑足帧数：落点动画 0.55s，给 3 秒稳稳落定
+      renderFrames(180)
+      window.__preview.stats = world.getStats()
+      window.__preview.ready = true
+    </script>
+  </body>
+</html>

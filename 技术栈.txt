@@ -1,0 +1,9 @@
+vue3+pinia+单页面开发路由roter+element plus
+前端AI交互集成（参考）
+技术/SDK	用途
+Vercel AI SDK	前端AI流式对话、Tool Calling、生成式UI（推荐首选）
+LangChain.js	浏览器端LLM链式调用、轻量Agent
+Transformers.js	浏览器端本地模型推理（端侧AI）
+WebGPU / ONNX Runtime Web	高性能浏览器端AI计算
+Web Speech API	语音输入/输出交互
+MediaPipe	实时图像/视频AI处理（人脸、手势、姿态等）
