@@ -23,9 +23,21 @@ This template should help get you started developing with Vue 3 in Vite.
 | 命令 | 验证内容 |
 | --- | --- |
 | `npm run check:terrain` | 噪声确定性、高度场值域、三角剖分无缝、拾取精度、飘带贴地等 60+ 项 |
-| `npm run check:world` | 用假 DOM 真实构建场景图并派发交互事件，50+ 项；含初始取景的 NDC 实测 |
+| `npm run check:world` | 用假 DOM 真实构建场景图并派发交互事件，60+ 项；含取景的 NDC 实测 |
 | `npm run check:view` | 用 `@vue/compiler-sfc` 编译所有 `.vue`，并解析三维模块导入图 |
 | `npm run check` | 依次执行以上三个 |
+
+## 离线预览渲染
+
+三维画面好不好看只能靠眼睛，但"能不能自己看到"不该依赖运气。所以有两套出图方案：
+
+| 命令 | 说明 |
+| --- | --- |
+| `npm run preview:soft` | **纯 JS 软件光栅器**，零依赖、不需要浏览器/WebGL。复用真实的几何、配色、光照与相机参数，自己光栅化成 PNG（`scripts/preview/soft-shots/`）。用于检查构图、地形形态、配色分层 |
+| `npm run preview:shot` | 走 Chrome DevTools Protocol 驱动 Edge/Chrome 无头截图（`scripts/preview/shots/`），是像素级真实结果。只用 Node 内置的 `fetch` + `WebSocket`，不需要 puppeteer |
+
+> `preview:shot` 需要浏览器能正常初始化。在禁止命名管道的受限沙箱里 Chromium 起不来
+> （mojo IPC 依赖命名管道，进程会活着但永远初始化不完），此时用 `preview:soft`。
 
 ## Recommended IDE Setup
 

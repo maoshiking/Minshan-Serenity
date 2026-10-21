@@ -232,8 +232,9 @@ check('垂直下投命中地表', pickOk)
 check('垂直下投精度 < 0.01', worstErr < 0.01, `worstErr=${worstErr.toExponential(3)}`)
 
 // 斜向射线：命中点必须自身就在地表上（自洽性校验）
-let obliqueOk = true
+let obliqueMisses = 0
 let obliqueWorst = 0
+let firstMiss = ''
 const origin = new THREE.Vector3(-f1.size * 0.9, f1.heightScale * 1.6, f1.size * 1.1)
 for (let k = 0; k < 80; k++) {
   const targetX = (k / 80 - 0.5) * f1.size * 0.85
@@ -242,13 +243,16 @@ for (let k = 0; k < 80; k++) {
   const dir = new THREE.Vector3(targetX - origin.x, targetY - origin.y, targetZ - origin.z).normalize()
   const hit = raycastField(f1, new THREE.Ray(origin.clone(), dir))
   if (!hit) {
-    obliqueOk = false
-    break
+    obliqueMisses++
+    if (!firstMiss) {
+      firstMiss = `k=${k} 目标=(${targetX.toFixed(1)}, ${targetY.toFixed(1)}, ${targetZ.toFixed(1)}) 目标处高度=${targetY.toFixed(2)}`
+    }
+    continue
   }
   const err = Math.abs(hit.point.y - f1.worldHeight(hit.point.x, hit.point.z))
   if (err > obliqueWorst) obliqueWorst = err
 }
-check('斜向射线命中点自洽', obliqueOk)
+check('斜向射线全部命中', obliqueMisses === 0, `${obliqueMisses}/80 未命中；首个：${firstMiss}`)
 check('斜向射线精度 < 0.02', obliqueWorst < 0.02, `worst=${obliqueWorst.toExponential(3)}`)
 
 // 朝天空打：必须打空
@@ -257,9 +261,19 @@ check('朝天空射线返回 null', raycastField(f1, skyRay) === null)
 // 完全偏离地图：必须打空
 const awayRay = new THREE.Ray(new THREE.Vector3(f1.size * 3, 30, f1.size * 3), new THREE.Vector3(1, -0.2, 1).normalize())
 check('偏离地图射线返回 null', raycastField(f1, awayRay) === null)
-// 相机在地下：必须打空，不能把标记甩得到处都是
+// 起点在地表之下、朝上：返回"穿出地表"的那一点，而不是判空。
+// 地图外的射线可能从侧面切进山体，一进入范围就已经在地表之下，这种点击不该被丢掉
 const undergroundRay = new THREE.Ray(new THREE.Vector3(0, -5, 0), new THREE.Vector3(0, 1, 0).normalize())
-check('地下射线返回 null', raycastField(f1, undergroundRay) === null)
+const exitHit = raycastField(f1, undergroundRay)
+check('地下起点朝上的射线返回穿出点', !!exitHit)
+check(
+  '穿出点自身落在地表上',
+  !!exitHit && Math.abs(exitHit.point.y - f1.worldHeight(exitHit.point.x, exitHit.point.z)) < 1e-6,
+  exitHit ? `Δ=${Math.abs(exitHit.point.y - f1.worldHeight(exitHit.point.x, exitHit.point.z)).toExponential(3)}` : '无命中',
+)
+// 一直在地表之下、始终不穿出：必须打空
+const deepRay = new THREE.Ray(new THREE.Vector3(0, -1000, 0), new THREE.Vector3(1, 0, 0).normalize())
+check('始终在地下的射线返回 null', raycastField(f1, deepRay) === null)
 
 // ---------- 5. 撒树判据 ----------
 check('地图边缘不可种植', f1.plantable(f1.size * 0.499, 0) === false)

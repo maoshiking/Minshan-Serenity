@@ -60,25 +60,62 @@ export function raycastField(field, ray, options = {}) {
 
   let tPrev = tMin
   let gPrev = gap(tPrev)
-  // 相机在地形内部或地下（理论上不会发生，但别让它把画面点得到处是标记）
-  if (gPrev <= 0) return null
+  if (gPrev === 0) return hitAt(field, o, d, tMin)
+
+  // 记录整条射线上最接近地表的一点，供"相切"兜底使用
+  let closestT = tMin
+  let closestGap = Math.abs(gPrev)
 
   for (let t = tMin + step; t <= tMax; t += step) {
     const g = gap(t)
-    if (g <= 0) {
-      // 找到符号翻转的区间，二分收敛到交点
+    const absGap = Math.abs(g)
+    if (absGap < closestGap) {
+      closestGap = absGap
+      closestT = t
+    }
+
+    // 找第一个"上下穿面"的位置，两个方向都要认。
+    //
+    // 从上方穿到下方是正常的落点。从下方穿到上方则发生在射线从地图侧面切进山体时：
+    // 地表只存在于地图范围内，所以射线一进入范围就可能已经在地表之下（起点在"山体内部"），
+    // 这时往前穿出的那一点，才是使用者实际看到并点中的那个表面。
+    // 早先这里直接判定"起点在地下就返回 null"，表现就是地图边缘的山点不中。
+    if ((gPrev > 0 && g <= 0) || (gPrev < 0 && g >= 0)) {
+      const above = gPrev > 0
       let lo = tPrev
       let hi = t
       for (let k = 0; k < precision; k++) {
         const mid = (lo + hi) * 0.5
-        if (gap(mid) > 0) lo = mid
+        const gm = gap(mid)
+        if (above ? gm > 0 : gm < 0) lo = mid
         else hi = mid
       }
-      const tHit = (lo + hi) * 0.5
-      return hitAt(field, o, d, tHit)
+      return hitAt(field, o, d, (lo + hi) * 0.5)
     }
+
     tPrev = t
     gPrev = g
+  }
+
+  /*
+   * 没有任何穿面，但有可能是射线正好与地表「相切」——擦着山脊过去，
+   * gap 触零后立刻回升，符号始终不变。这种情况数学上交点确实存在，
+   * 而且对应"点山脊边缘/轮廓线"这个真实操作，不该判空。
+   *
+   * 阈值取 heightScale 的 1%（远小于一个格子的起伏），所以悬空点击不会被误判成命中。
+   */
+  if (closestGap < field.heightScale * 0.01) {
+    // 切点处 gap 不变号，二分法用不上，改用三分搜索把 |gap| 的最小值收敛出来，
+    // 否则返回的只是最近的采样点，在脊线附近会有几个百分点的误差
+    let lo = Math.max(tMin, closestT - step)
+    let hi = Math.min(tMax, closestT + step)
+    for (let k = 0; k < 40; k++) {
+      const m1 = lo + (hi - lo) / 3
+      const m2 = hi - (hi - lo) / 3
+      if (Math.abs(gap(m1)) < Math.abs(gap(m2))) hi = m2
+      else lo = m1
+    }
+    return hitAt(field, o, d, (lo + hi) * 0.5)
   }
 
   return null

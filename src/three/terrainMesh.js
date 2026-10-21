@@ -21,11 +21,17 @@ export const TERRAIN_PALETTE = {
   rock: '#918a7c',
   cliff: '#6f675c',
   snow: '#f4f6f7',
-  /** 沙盘侧壁与底面 */
-  wallTop: '#6f675c',
-  wallBottom: '#4a443c',
-  base: '#332e29',
+  /** 沙盘侧壁与底面。要够浅，否则底座会在画面里变成一大块黑，抢掉地形的视觉重量 */
+  wallTop: '#a89a86',
+  wallBottom: '#857867',
+  base: '#6b6053',
 }
+
+/**
+ * 底座厚度相对 heightScale 的比例。
+ * 抽成常量是因为离线预览渲染器必须用同一个值，否则预览里的沙盘厚度和真实场景不一致。
+ */
+export const SKIRT_DEPTH_FACTOR = 0.42
 
 /**
  * 高度 + 坡度 → 色带。

@@ -12,6 +12,8 @@
  */
 
 import * as THREE from 'three'
+// 只取一个常量：取景校验要按真实的底座厚度构造包围盒
+import { SKIRT_DEPTH_FACTOR } from '../src/three/terrainMesh.js'
 
 // ---------- DOM / canvas 测试替身 ----------
 const drawCalls = { fillRect: 0, stroke: 0, fill: 0, clearRect: 0 }
@@ -362,7 +364,7 @@ check('树林几何确有内容', vegetationFaces > 1000, `faces=${vegetationFac
 run('初始取景校验', () => {
   const f = world.field()
   const half = f.size / 2
-  const skirtDepth = f.heightScale * 0.85
+  const skirtDepth = f.heightScale * SKIRT_DEPTH_FACTOR
   const corners = []
   for (const x of [-half, half]) {
     for (const z of [-half, half]) {
@@ -370,11 +372,7 @@ run('初始取景校验', () => {
     }
   }
 
-  for (const aspect of [1.0, 1.6]) {
-    camera.aspect = aspect
-    camera.updateProjectionMatrix()
-    world.update(1 / 60, 100)
-
+  const measure = () => {
     let maxAbs = 0
     let inside = true
     for (const corner of corners) {
@@ -382,9 +380,26 @@ run('初始取景校验', () => {
       maxAbs = Math.max(maxAbs, Math.abs(p.x), Math.abs(p.y))
       if (Math.abs(p.x) > 1 || Math.abs(p.y) > 1) inside = false
     }
-    console.log(`  · 宽高比 ${aspect}：最坏角 NDC = ${maxAbs.toFixed(3)}`)
-    check(`宽高比 ${aspect}：地形完整在画面内`, inside, `maxAbs=${maxAbs.toFixed(3)}`)
-    check(`宽高比 ${aspect}：构图不过小`, maxAbs > 0.5, `maxAbs=${maxAbs.toFixed(3)}`)
+    return { maxAbs, inside }
+  }
+
+  // 构造完成时就该已经取好景（用的是创建时的宽高比 1.5）
+  world.update(1 / 60, 100)
+  const initial = measure()
+  console.log(`  · 构造后（宽高比 1.5）：最坏角 NDC = ${initial.maxAbs.toFixed(3)}`)
+  check('构造后取景已经成立', initial.inside && initial.maxAbs > 0.7, `maxAbs=${initial.maxAbs.toFixed(3)}`)
+
+  // 真正的产品保证：任何宽高比下"重置视角"都能重新贴合。
+  // 注意必须先 resetView —— 改宽高比本身不会自动重新取景（那会跟用户手动转动视角打架）
+  for (const aspect of [1.0, 1.5, 1.6]) {
+    camera.aspect = aspect
+    camera.updateProjectionMatrix()
+    world.resetView()
+    world.update(1 / 60, 100)
+    const { maxAbs, inside } = measure()
+    console.log(`  · 重置视角后（宽高比 ${aspect}）：最坏角 NDC = ${maxAbs.toFixed(3)}`)
+    check(`宽高比 ${aspect}：重置视角后地形完整在画面内`, inside, `maxAbs=${maxAbs.toFixed(3)}`)
+    check(`宽高比 ${aspect}：构图不过小`, maxAbs > 0.7, `maxAbs=${maxAbs.toFixed(3)}`)
   }
 
   camera.aspect = 1.5

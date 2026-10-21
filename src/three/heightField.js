@@ -29,8 +29,8 @@ export const DEFAULT_TERRAIN_OPTIONS = {
   /** 梯田化强度：让高度往最近的台阶靠拢，出卡通台地感 */
   terrace: 0.32,
   terraceSteps: 11,
-  /** 最高峰的世界高度 */
-  heightScale: 17,
+  /** 最高峰的世界高度。相对边长 120 约 20% 时立体感合适；太小会摊成一张绿饼 */
+  heightScale: 24,
   /** 归一化水位：低于它的地方被水覆盖 */
   waterLevel: 0.33,
   ridgeSeedOffset: 977,

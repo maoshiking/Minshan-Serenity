@@ -10,7 +10,9 @@
     "check:terrain": "node scripts/terrain-smoke.mjs",
     "check:world": "node scripts/world-smoke.mjs",
     "check:view": "node scripts/check-view.mjs",
-    "check": "node scripts/terrain-smoke.mjs && node scripts/world-smoke.mjs && node scripts/check-view.mjs"
+    "check": "node scripts/terrain-smoke.mjs && node scripts/world-smoke.mjs && node scripts/check-view.mjs",
+    "preview:soft": "node scripts/preview/soft-render.mjs",
+    "preview:shot": "node scripts/preview/shoot.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createHeightField, DEFAULT_TERRAIN_OPTIONS } from './heightField.js'
-import { buildTerrainGeometry, createToonGradientMap } from './terrainMesh.js'
+import { buildTerrainGeometry, createToonGradientMap, SKIRT_DEPTH_FACTOR } from './terrainMesh.js'
 import { raycastField } from './picking.js'
 import { buildRoutePoints, buildRouteRibbon, createDashTexture } from './route.js'
 import { createForest, createRocks, createSkyDome, createWater } from './scenery.js'
@@ -61,7 +61,7 @@ export function frameTerrainCamera(camera, { size, heightScale, aspect = 1, fill
   const corners = []
   for (const x of [-half, half]) {
     for (const z of [-half, half]) {
-      for (const y of [-heightScale * 0.85, heightScale]) corners.push(new THREE.Vector3(x, y, z))
+      for (const y of [-heightScale * SKIRT_DEPTH_FACTOR, heightScale]) corners.push(new THREE.Vector3(x, y, z))
     }
   }
 
@@ -210,7 +210,7 @@ export function createTerrainWorld({
     terrainGroup = new THREE.Group()
     root.add(terrainGroup)
 
-    const geometry = buildTerrainGeometry(field, { skirtDepth: field.heightScale * 0.85 })
+    const geometry = buildTerrainGeometry(field, { skirtDepth: field.heightScale * SKIRT_DEPTH_FACTOR })
     const material = new THREE.MeshToonMaterial({
       vertexColors: true,
       gradientMap: toonGradient,

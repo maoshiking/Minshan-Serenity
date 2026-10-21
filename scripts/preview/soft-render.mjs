@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 import * as THREE from 'three'
 
 import { createHeightField } from '../../src/three/heightField.js'
-import { buildTerrainGeometry, pickBand, TERRAIN_PALETTE } from '../../src/three/terrainMesh.js'
+import { buildTerrainGeometry, pickBand, SKIRT_DEPTH_FACTOR, TERRAIN_PALETTE } from '../../src/three/terrainMesh.js'
 import { buildRoutePoints, buildRouteRibbon } from '../../src/three/route.js'
 import { createForest, createRocks, pickWaterBand, skyColorAt, WATER_PALETTE } from '../../src/three/scenery.js'
 import { SCENE_LOOK, frameTerrainCamera } from '../../src/three/cartoonTerrain.js'
@@ -112,7 +112,7 @@ function toonBand(dotNL) {
 // ---------- 构建场景数据 ----------
 console.log('构建高度场与几何……')
 const field = createHeightField({ seed: SEED, resolution: RESOLUTION })
-const terrainGeometry = buildTerrainGeometry(field, { skirtDepth: field.heightScale * 0.85 })
+const terrainGeometry = buildTerrainGeometry(field, { skirtDepth: field.heightScale * SKIRT_DEPTH_FACTOR })
 
 const forest = createForest(field)
 const rocks = createRocks(field)
