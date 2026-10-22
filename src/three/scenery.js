@@ -141,77 +141,6 @@ export function createWaterTexture({ size = 256, seed = 7 } = {}) {
 }
 
 /**
- * 水面：一块贴满地图的平面，颜色按水深分成硬色带。
- *
- * 不做半透明——不透明才能彻底绕开透明排序问题，而"能看见水下"对卡通地图毫无必要；
- * 深度感由色带表达就够了。
- */
-export function createWater(field, options = {}) {
-  const { segments = 72, repeat = 5, gradientMap, waveSpeed = 0.022 } = options
-
-  const waterY = field.waterY()
-  const texture = createWaterTexture({ seed: field.options.seed + 31 })
-  const ownedGradient = gradientMap ? null : createToonGradientMap()
-  const gm = gradientMap ?? ownedGradient
-
-  const geometry = new THREE.PlaneGeometry(field.size, field.size, segments, segments)
-  // 平移到 XZ 平面，法线朝上
-  geometry.rotateX(-Math.PI / 2)
-
-  const position = geometry.attributes.position
-  const colorsAttr = new Float32Array(position.count * 3)
-  const bandColors = {
-    foam: new THREE.Color(WATER_PALETTE.foam),
-    shallow: new THREE.Color(WATER_PALETTE.shallow),
-    mid: new THREE.Color(WATER_PALETTE.mid),
-    deep: new THREE.Color(WATER_PALETTE.deep),
-  }
-  const c = new THREE.Color()
-  const maxDepth = Math.max(waterY, 1e-3)
-
-  for (let i = 0; i < position.count; i++) {
-    const x = position.getX(i)
-    const z = position.getZ(i)
-    const depth = Math.max(waterY - field.worldHeightSmooth(x, z), 0)
-    // 硬边分层：卡通水面靠色带，一上渐变立刻变写实
-    c.copy(bandColors[pickWaterBand(Math.min(depth / maxDepth, 1))])
-
-    colorsAttr[i * 3] = c.r
-    colorsAttr[i * 3 + 1] = c.g
-    colorsAttr[i * 3 + 2] = c.b
-  }
-  geometry.setAttribute('color', new THREE.BufferAttribute(colorsAttr, 3))
-
-  texture.repeat.set(repeat, repeat)
-
-  const material = new THREE.MeshToonMaterial({
-    vertexColors: true,
-    map: texture,
-    gradientMap: gm,
-  })
-
-  const mesh = new THREE.Mesh(geometry, material)
-  mesh.position.y = waterY
-  mesh.receiveShadow = true
-
-  function update(delta, elapsed) {
-    // 滚动贴图 = 水流。比顶点位移便宜一个数量级，卡通水体也看不出区别
-    texture.offset.x += delta * waveSpeed
-    texture.offset.y -= delta * waveSpeed * 0.45
-    mesh.position.y = waterY + Math.sin(elapsed * 0.7) * 0.05
-  }
-
-  function dispose() {
-    geometry.dispose()
-    material.dispose()
-    texture.dispose()
-    ownedGradient?.dispose()
-  }
-
-  return { mesh, update, dispose }
-}
-
-/**
  * 树林：三棵一组（树干 + 下层锥 + 上层锥）用 InstancedMesh 铺开。
  *
  * 用实例化而不是 merge 成一个巨大几何：三次 draw call 就能画出近千棵树，
@@ -226,7 +155,22 @@ export function createForest(field, options = {}) {
     minHeight = field.waterLevel + 0.07,
     maxHeight = 0.82,
     maxSlope = 0.42,
+    /**
+     * 尺寸系数。树木几何是按"沙盘"标定的世界单位（整棵约 4.3 单位高），
+     * 当 field 是世界米制尺度（如 1600 m）而非 120 单位沙盘时，
+     * 必须按 size/120 放大，否则一棵 4 米高的树在 1.6 km 地图上小到看不见。
+     * 默认由 field.size 自动推导，显式传入可覆盖。
+     */
+    sizeScale = field.size / 120,
     gradientMap,
+    /**
+     * 禁区：不希望长树的地方（聚落建筑、路线停留点等）。
+     * 形如 [{ x, z, radius }]。不传就是原来的行为。
+     *
+     * 为什么需要：聚落与树林是各自独立生成的，谁也不知道对方在哪，
+     * 结果是树长在屋顶上、房子被树埋住——近景一看就露馅。
+     */
+    exclusions = [],
   } = options
 
   const random = mulberry32(seed)
@@ -236,6 +180,17 @@ export function createForest(field, options = {}) {
   const half = field.size / 2
   const cell = field.size / slots
   const placements = []
+
+  /** 是否落在任何禁区内 */
+  const blockedBy = (x, z) => {
+    for (const ex of exclusions) {
+      const dx = x - ex.x
+      const dz = z - ex.z
+      const r = ex.radius ?? 0
+      if (dx * dx + dz * dz < r * r) return true
+    }
+    return false
+  }
 
   for (let j = 0; j < slots && placements.length < maxCount; j++) {
     for (let i = 0; i < slots && placements.length < maxCount; i++) {
@@ -249,6 +204,7 @@ export function createForest(field, options = {}) {
       })
       if (random() > density * smoothstep(0.34, 0.74, mask)) continue
       if (!field.plantable(x, z, { minHeight, maxHeight, maxSlope })) continue
+      if (exclusions.length && blockedBy(x, z)) continue
 
       placements.push({
         x,
@@ -294,7 +250,8 @@ export function createForest(field, options = {}) {
     const p = placements[i]
     position.set(p.x, p.y, p.z)
     quaternion.setFromAxisAngle(axis, p.rotation)
-    scale.set(p.scale, p.scale * p.stretch, p.scale)
+    const s = p.scale * sizeScale
+    scale.set(s, s * p.stretch, s)
     matrix.compose(position, quaternion, scale)
 
     trunkMesh.setMatrixAt(i, matrix)
@@ -315,7 +272,11 @@ export function createForest(field, options = {}) {
   if (lowerMesh.instanceColor) lowerMesh.instanceColor.needsUpdate = true
   if (upperMesh.instanceColor) upperMesh.instanceColor.needsUpdate = true
 
-  return { group, count, dispose: () => ownedGradient?.dispose() }
+  /**
+   * 同时导出布局：没有它就无法定量核对"树有没有长在建筑上"。
+   * 近景里"树在房后"和"树在屋顶上"在静态图上几乎分不出来，只能靠数字。
+   */
+  return { group, count, layout: placements, dispose: () => ownedGradient?.dispose() }
 }
 
 /**

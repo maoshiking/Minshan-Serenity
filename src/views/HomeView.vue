@@ -34,7 +34,7 @@ const stack = computed(() => [
       <div class="actions">
         <el-button type="primary" @click="$router.push({ name: 'terrain' })">
           <el-icon><Location /></el-icon>
-          <span>打开三维卡通地形</span>
+          <span>打开水磨古镇三维地形</span>
         </el-button>
         <el-button plain @click="$router.push({ name: 'lab' })">
           <el-icon><Monitor /></el-icon>

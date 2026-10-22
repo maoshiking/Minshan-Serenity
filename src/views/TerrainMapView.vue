@@ -1,8 +1,9 @@
 <script setup>
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useThreeStage } from '@/composables/useThreeStage'
 import { createTerrainWorld } from '@/three/cartoonTerrain'
+import { demTerrainOptions, loadDemData, loadDemMeta, resampleDem } from '@/three/demField'
 
 const stageHost = ref(null)
 const labelLayer = ref(null)
@@ -21,7 +22,24 @@ const placeEnabled = ref(true)
 const routeEnabled = ref(true)
 const shadowEnabled = ref(true)
 const lightIntensity = ref(2.1)
-const resolution = ref(112)
+/**
+ * 地形来源。**只有真实 DEM 一条路**。
+ *
+ * 早先这里还有个"程序化沙盘"开关，那是海岛原型的遗留，已随之一并移除。
+ * 现在 cartoonTerrain 在没有 DEM 时会直接抛错——这是刻意的：
+ * **静默退回一个假地形，会让人以为看到的是真实地形。**
+ */
+
+/** DEM 装载状态，供面板显示 */
+const demPhase = ref('idle')
+const demNote = ref('')
+let demMeta = null
+
+/**
+ * 画面精度。档位按实测面数预算定（见 scripts/dem/check-performance.mjs）：
+ * 384² 合计约 30.6 万面，在 40 万预算内；512² 到 53.9 万面，超出预算。
+ */
+const resolution = ref(256)
 
 const { error } = useThreeStage({
   container: stageHost,
@@ -61,12 +79,90 @@ watch(placeEnabled, (v) => worldRef.value?.setPlaceEnabled(v))
 watch(routeEnabled, (v) => worldRef.value?.setRouteEnabled(v))
 watch(shadowEnabled, (v) => worldRef.value?.setShadowEnabled(v))
 watch(lightIntensity, (v) => worldRef.value?.setLightIntensity(v))
-watch(resolution, (v) => worldRef.value?.rebuild({ resolution: v }))
+/**
+ * 精度切换。
+ *
+ * DEM 是外部数据，改精度要把原始高度场按目标格数重采样，
+ * 再连同 demTerrainOptions 一起交给世界；不能只改 resolution 重建。
+ */
+watch(resolution, async (v) => {
+  if (!demMeta) return
+  try {
+    const dem = await loadDemData(demMeta)
+    // 用 setResolution：只换精度，不重置用户已经调好的视角
+    if (worldRef.value) {
+      worldRef.value.setResolution(v, {
+        demField: {
+          data: resampleDem(dem, v),
+          meta: dem.meta,
+          osmBuildings: dem.osmBuildings,
+          resolution: v,
+          sizeMeters: dem.sizeMeters,
+        },
+        ...demTerrainOptions(dem.meta),
+      })
+    }
+  } catch (err) {
+    ElMessage.error('切换精度失败：' + err.message)
+  }
+})
 
+/** 把 DEM 高度场灌进世界（按当前精度降采样） */
+function applyDem(dem, res) {
+  worldRef.value?.setDemField(
+    {
+      data: resampleDem(dem, res),
+      meta: dem.meta,
+      osmBuildings: dem.osmBuildings,
+      resolution: res,
+      sizeMeters: dem.sizeMeters,
+    },
+    { resolution: res, ...demTerrainOptions(dem.meta) },
+  )
+}
+
+function demSummary(meta) {
+  return (
+    '真实地形 · ' + meta.sizeMeters + ' m 见方 · 高差 ' + meta.elevation.span +
+    ' m · ' + meta.elevation.min + '–' + meta.elevation.max + ' m'
+  )
+}
+
+/**
+ * 装载真实地形。分两步取：先拿元数据（约 1.6 KB）把场景尺寸与高差定下来，
+ * 1 MB 的高度场随后灌进去——这样首屏不会被那 1 MB 卡住。
+ */
+async function loadRealTerrain() {
+  demPhase.value = 'loading'
+  demNote.value = '正在取高程元数据…'
+  try {
+    demMeta = demMeta ?? (await loadDemMeta())
+    demNote.value = '正在取高度场（' + demMeta.grid.cols + '×' + demMeta.grid.rows + '）…'
+    const dem = await loadDemData(demMeta)
+    if (!worldRef.value) return
+    applyDem(dem, resolution.value)
+    demPhase.value = 'ready'
+    demNote.value = demSummary(demMeta)
+    ElMessage.success('已载入水磨古镇真实 DEM 地形')
+  } catch (err) {
+    demPhase.value = 'failed'
+    demNote.value = 'DEM 载入失败：' + err.message
+    // 不退回假地形：明确报错，让人知道这里确实没有真实数据
+    ElMessage.error('真实地形不可用：' + err.message)
+  }
+}
+
+onMounted(() => {
+  loadRealTerrain()
+})
+
+/**
+ * 真实地形没有"换一张"这个概念——它就是水磨古镇。
+ * 按钮保留但改为重置视角，避免点下去毫无反应。
+ */
 function reroll() {
-  const seed = Math.floor(Math.random() * 100000000)
-  worldRef.value?.rebuild({ seed })
-  ElMessage.success(`换了一张地形 · seed ${seed}`)
+  worldRef.value?.resetView()
+  ElMessage.info('真实地形只有一张。已重置视角。')
 }
 
 function undo() {
@@ -99,9 +195,12 @@ const markerText = computed(() => `${stats.value.markerCount} / ${worldRef.value
 
       <div class="hud hud--top">
         <div class="hud-card">
-          <p class="eyebrow">三维卡通地形</p>
-          <h1>Minshan Terrain</h1>
-          <p class="hud-sub">程序化生成 · 单次落点拾取 · 贴地路线</p>
+          <p class="eyebrow">三维地形</p>
+          <h1>水磨古镇</h1>
+          <p class="hud-sub">真实 DEM 高程 · 单次落点拾取 · 贴地路线</p>
+          <p v-if="demNote" class="hud-note" :class="{ 'hud-note--bad': demPhase === 'failed' }">
+            {{ demNote }}
+          </p>
         </div>
         <div class="hud-actions">
           <el-button size="small" @click="worldRef?.resetView()">
@@ -157,10 +256,16 @@ const markerText = computed(() => `${stats.value.markerCount} / ${worldRef.value
 
         <div class="field field--stack">
           <span class="field-label">地形精度</span>
+          <!--
+            档位是按实测面数预算定的（见 scripts/dem/check-performance.mjs）：
+            384² 合计约 30.6 万面，在 40 万预算内；512² 会到 53.9 万面，超出预算。
+            所以 512 保留但标注"需谨慎"，默认给 256。
+          -->
           <el-select v-model="resolution" size="small">
-            <el-option :value="72" label="流畅 · 72 格" />
-            <el-option :value="112" label="标准 · 112 格" />
-            <el-option :value="160" label="精细 · 160 格" />
+            <el-option :value="128" label="流畅 · 128 格（约 4.5 万面）" />
+            <el-option :value="256" label="标准 · 256 格（约 14.4 万面）" />
+            <el-option :value="384" label="精细 · 384 格（约 30.6 万面）" />
+            <el-option :value="512" label="高画质 · 512 格（约 53.9 万面，需谨慎）" />
           </el-select>
         </div>
 
@@ -348,6 +453,16 @@ const markerText = computed(() => `${stats.value.markerCount} / ${worldRef.value
   letter-spacing: -0.01em;
 }
 
+.hud-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ms-text-muted);
+}
+
+.hud-note--bad {
+  color: var(--ms-accent);
+}
 .hud-sub {
   margin: 4px 0 0;
   font-size: 12px;

@@ -10,7 +10,10 @@
     "check:terrain": "node scripts/terrain-smoke.mjs",
     "check:world": "node scripts/world-smoke.mjs",
     "check:view": "node scripts/check-view.mjs",
-    "check": "node scripts/terrain-smoke.mjs && node scripts/world-smoke.mjs && node scripts/check-view.mjs",
+    "check:dem": "node scripts/check-dem-path.mjs",
+    "check:serve": "node scripts/check-dev-serve.mjs",
+    "check:preview": "node scripts/check-preview-serve.mjs",
+    "check": "node scripts/terrain-smoke.mjs && node scripts/world-smoke.mjs && node scripts/check-view.mjs && node scripts/check-dem-path.mjs && node scripts/check-dev-serve.mjs && node scripts/check-preview-serve.mjs",
     "preview:soft": "node scripts/preview/soft-render.mjs",
     "preview:shot": "node scripts/preview/shoot.mjs"
   },

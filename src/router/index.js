@@ -21,7 +21,7 @@ const routes = [
     path: '/terrain',
     name: 'terrain',
     component: () => import('@/views/TerrainMapView.vue'),
-    meta: { title: '三维卡通地形', public: true },
+    meta: { title: '水磨古镇地形', public: true },
   },
   {
     path: '/:pathMatch(.*)*',

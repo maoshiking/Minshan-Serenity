@@ -12,15 +12,22 @@ import { hash2 } from './noise.js'
  */
 
 export const TERRAIN_PALETTE = {
-  deepWater: '#24506b',
-  shallowWater: '#4d94ad',
-  sand: '#ecd9a4',
-  grass: '#86b45c',
-  meadow: '#a6c86d',
-  forest: '#4e7c46',
-  rock: '#918a7c',
-  cliff: '#6f675c',
-  snow: '#f4f6f7',
+  deepWater: '#1f4a63',
+  shallowWater: '#46809b',
+  /** 河床砾石滩。岷山河谷枯水期露出大片砾石，是这个场景最有辨识度的特征之一 */
+  sand: '#cfc4ae',
+  /** 农田/河滩草甸。水磨古镇河谷有大量耕作带 */
+  field: '#9fb469',
+  grass: '#7a9e4e',
+  /** 岷山以林山为主，森林必须是最宽的色带，不能是点缀 */
+  forest: '#3f6238',
+  /** 阴坡密林：比 forest 更深，用来表现真实山体的沟壑层次 */
+  darkForest: '#2c4830',
+  /** 高海拔草甸：岷山 1200 m 以上林线附近的开阔地 */
+  alpineMeadow: '#a0ab6b',
+  rock: '#8b8578',
+  cliff: '#655e54',
+  snow: '#eef1f3',
   /** 沙盘侧壁与底面。要够浅，否则底座会在画面里变成一大块黑，抢掉地形的视觉重量 */
   wallTop: '#a89a86',
   wallBottom: '#857867',
@@ -28,28 +35,80 @@ export const TERRAIN_PALETTE = {
 }
 
 /**
- * 底座厚度相对 heightScale 的比例。
- * 抽成常量是因为离线预览渲染器必须用同一个值，否则预览里的沙盘厚度和真实场景不一致。
+ * 高度 + 坡度 → 色带。
+ *
+ * 岷山与海岛的区别（这是阈值必须重定的原因）
+ * ------------------------------------------------
+ * 海岛沙盘的地形是噪声生成的，坡度温和，0.38 判岩、0.6 判崖刚好。
+ * 真实岷山地形实测坡度中位数就有 ~0.74（约 48°），沿用旧阈值会把
+ * 66% 的面积画成裸岩，整座山变成灰扑扑的石头堆——但真实的岷山是**林山**，
+ * 陡坡上照样长满树。
+ *
+ * 所以判据改成"覆盖物"而不是"坡度"：
+ *   - 水与砾石滩按高度判（水面最平，也是最低处）
+ *   - 植被在很陡的坡上仍然存在（0.86 约 58° 才开始露岩）
+ *   - 裸岩只在真正的陡崖上出现
+ * 这样既保留真实地形的陡峭感，又符合岷山以林为主的视觉事实。
  */
-export const SKIRT_DEPTH_FACTOR = 0.42
-
 /**
  * 高度 + 坡度 → 色带。
- * 全是硬阈值：卡通地形靠"分层"表达地形，靠渐变就变成写实了。
+ *
+ * 有两条既有约定不能破（terrain-smoke 里有断言，它们是对的）：
+ *   1. **陡崖优先于高度**：够陡就是崖，不管它在多高（pickBand(0.95, 0.7) 必须是 cliff）
+ *   2. **陡坡一律给岩石不给雪**：否则山顶侧面会散落白块，看着像破面
+ *
+ * 阈值怎么定的（全部来自实测，不是感觉）
+ * ------------------------------------------------
+ * 用 12.5 m 物理基线（slopeRadius = 2）的 slopeAt 分位数：
+ *   P50 4.2° · P90 14.6° · P95 18.9° · P98 24.5° · P99 28.4° · 最大 51.1°
+ * 分布形态是对的：多数面积是平缓的河谷与台地，陡的谷壁在尾部。
+ *
+ * @param {number} height01   归一化高度 0..1
+ * @param {number} slope01    坡度 0..1（1 - 法线.y）
+ * @param {number} [waterLevel] 归一化水位
+ * @param {number} [elevSpan] 场景真实高差（米）。用于把"水深几米"换算成归一化偏移。
+ *                            不传则按 355 m（本项目的实际高差）处理。
  */
-export function pickBand(height01, slope01, waterLevel = 0.33) {
-  if (slope01 > 0.6) return 'cliff'
-  // 陡坡一律给岩石。早先让"高处 + 中等陡"也判成雪，结果山顶侧面出现零散白块，
-  // 看着像破面而不是雪线——雪只该留给平缓的高处。
-  if (slope01 > 0.38) return 'rock'
-  if (height01 < waterLevel - 0.045) return 'deepWater'
-  if (height01 < waterLevel + 0.012) return 'shallowWater'
-  if (height01 < waterLevel + 0.06) return 'sand'
-  if (height01 < 0.5) return 'grass'
-  if (height01 < 0.66) return 'meadow'
-  if (height01 < 0.8) return 'forest'
-  if (height01 < 0.9) return 'rock'
-  return 'snow'
+export function pickBand(height01, slope01, waterLevel = 0.33, elevSpan = 355) {
+  /**
+   * 水与滩先判。
+   *
+   * 分界按**物理深度**定，而不是拍一个归一化偏移。实测本场景：
+   *   河谷最低点归一化 0.053（海拔 912 m）
+   *   水面        归一化 0.070（海拔 918 m）
+   * 水面最深处只有约 7 m，所以深水取"水面下 4 m"，覆盖约 0.6%。
+   *
+   * 这个色带被写坏过三次，每次症状都一样：占比 0.02%、视觉上不存在。
+   * 根因都是拿一个固定归一化偏移去套，而没算过"那到底相当于几米"。
+   * 所以这里改成由 elevSpan 现算，不再写死。
+   */
+  const deepOffset = 4 / elevSpan
+  if (height01 < waterLevel - deepOffset) return 'deepWater'
+  if (height01 < waterLevel + 0.004) return 'shallowWater'
+  if (height01 < waterLevel + 0.045) return 'sand'
+
+  // 陡崖优先于高度：够陡就是崖
+  if (slope01 > 0.5) return 'cliff'
+  // 陡坡一律给岩石，不看高度——否则山顶侧面会出现零散雪块，像破面
+  if (slope01 > 0.27) return 'rock'
+
+  // 雪只在最高的平缓处（岷山这个高差约 350 m，雪线本就该很高）
+  if (height01 > 0.93) return 'snow'
+
+  /**
+   * 植被：按海拔分层。
+   *
+   * 关键的纠正：早先给 0.34 以下留了一大段 grass，结果 grass 占到 48.6%。
+   * 但实测河谷底在归一化 0.13–0.25（海拔 940–980 m），这个高度在岷山
+   * **满山都是树**，不该是大片草地。grass 只该留给镇子附近的开阔地，
+   * 所以把它压到 waterLevel 以上很窄的一段。
+   */
+  if (height01 < waterLevel + 0.062) return 'field'
+  if (height01 < waterLevel + 0.1) return 'grass'
+  if (height01 < 0.46) return 'forest'
+  if (height01 < 0.68) return 'darkForest'
+  if (height01 < 0.88) return 'forest'
+  return 'alpineMeadow'
 }
 
 /**
@@ -113,7 +172,15 @@ export function buildTerrainGeometry(field, options = {}) {
     for (let i = 0; i < last; i++) {
       const u = (i + 0.5) / last
       const v = (j + 0.5) / last
-      const band = pickBand(field.heightAt(u, v), field.slopeAt(u, v), field.waterLevel)
+      /**
+       * 传真实高差而不是 heightScale。
+       *
+       * 因为 heightScale 可能带纵向放大系数（DEM 模式为 1.5），
+       * 而 pickBand 里"水面下 4 m 算深水"的换算必须用真实米数，否则深度判据会偏。
+       * 归一化高度本身与放大无关，所以只有这个换算比例需要修正。
+       */
+      const trueSpan = field.options?.elevationSpan ?? heightScale
+      const band = pickBand(field.heightAt(u, v), field.slopeAt(u, v), field.waterLevel, trueSpan)
       tmp.copy(resolved[band]).multiplyScalar(1 + (hash2(i, j, 0x51ed) - 0.5) * jitter)
 
       const x0 = px(i)

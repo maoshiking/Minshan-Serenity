@@ -1,0 +1,83 @@
+{
+  "id": "shuimo-core",
+  "generatedAt": "2026-10-21T13:04:03.973Z",
+  "source": "AWS Terrain Tiles (Terrarium), 公开数据集",
+  "licenseNote": "使用前请自行核对数据集的再分发条款",
+  "tileZoom": 15,
+  "grid": {
+    "cols": 512,
+    "rows": 512,
+    "layout": "row-major"
+  },
+  "sizeMeters": 1600,
+  "origin": {
+    "lat": 30.930068,
+    "lon": 103.420265
+  },
+  "bounds": {
+    "north": 30.93726664665443,
+    "south": 30.92286935334557,
+    "west": 103.41188713934251,
+    "east": 103.42864286065749
+  },
+  "elevation": {
+    "min": 893,
+    "max": 1249,
+    "span": 355,
+    "unit": "m"
+  },
+  "waterLevelCandidates": {
+    "min10pct": 0.1,
+    "min5pct": 0.05
+  },
+  "files": {
+    "height": "/terrain/shuimo-dem.bin"
+  },
+  "landmarks": [
+    {
+      "name": "黄龙道观",
+      "lon": 103.41721,
+      "lat": 30.92835
+    },
+    {
+      "name": "春风阁",
+      "lon": 103.420068,
+      "lat": 30.929212
+    },
+    {
+      "name": "禅寿老街·万年台",
+      "lon": 103.420881,
+      "lat": 30.930634
+    },
+    {
+      "name": "字库塔",
+      "lon": 103.420613,
+      "lat": 30.93074
+    },
+    {
+      "name": "羌碉、西羌汇",
+      "lon": 103.419371,
+      "lat": 30.929548
+    },
+    {
+      "name": "致远廊桥",
+      "lon": 103.42143,
+      "lat": 30.93016
+    },
+    {
+      "name": "寿溪湖环湖步道",
+      "lon": 103.420251,
+      "lat": 30.928652
+    },
+    {
+      "name": "仁吉喜目谷",
+      "lon": 103.436958,
+      "lat": 30.942703
+    },
+    {
+      "name": "和谐广场",
+      "lon": 103.422298,
+      "lat": 30.933248
+    }
+  ]
+}

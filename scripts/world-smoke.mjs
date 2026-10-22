@@ -12,8 +12,11 @@
  */
 
 import * as THREE from 'three'
-// 只取一个常量：取景校验要按真实的底座厚度构造包围盒
-import { SKIRT_DEPTH_FACTOR } from '../src/three/terrainMesh.js'
+import { skirtDepthOf } from '../src/three/cartoonTerrain.js'
+import { demTerrainOptions } from '../src/three/demField.js'
+// 真实高程数据。世界现在只接受 DEM——没有它 createTerrainWorld 会直接抛错，
+// 而不是悄悄退回一个假地形（静默降级会让人以为看到的是真实地形）。
+import { loadDemFixtureSync } from './lib/dem-fixture.mjs'
 
 // ---------- DOM / canvas 测试替身 ----------
 const drawCalls = { fillRect: 0, stroke: 0, fill: 0, clearRect: 0 }
@@ -180,18 +183,53 @@ const labelLayer = createFakeElement('div')
 // 直接调 getStats() 是查不出这个问题的：漏广播时页面会一直显示 0
 const callbackLog = { stats: [], markers: [] }
 
+/**
+ * 世界现在只吃真实 DEM。
+ *
+ * **但必须按真实装载顺序来**：先建一个空世界（DOM 就绪时同步创建），
+ * 再通过 setDemField 把异步取回的 DEM 灌进去。
+ *
+ * 为什么不能图省事在构造时就传 DEM：那样测的是一条浏览器里不存在的路径。
+ * 实测代价——曾经实现里"缺少 DEM 就抛错"，构造时传了 DEM 的自检全绿，
+ * 而真实页面在数据到达前就被打死了。**自检的流程必须与线上一致。**
+ */
+const DEM_RESOLUTION = 96
+
 let world = null
-run('创建三维世界', () => {
+run('创建三维世界（尚无 DEM 数据）', () => {
   world = createTerrainWorld({
     scene,
     camera,
     renderer,
     labelLayer,
-    options: { resolution: 72, seed: 424242 },
+    options: { resolution: DEM_RESOLUTION },
     onMarkersChange: (list) => callbackLog.markers.push(list),
     onStats: (value) => callbackLog.stats.push(value),
   })
 })
+check('世界实例创建成功（空场景不抛错）', !!world)
+check('尚无 DEM 时高度场为空', world?.field() === null, `field=${world?.field()}`)
+
+const dem = loadDemFixtureSync({ resolution: DEM_RESOLUTION })
+run('灌入真实 DEM（模拟异步装载完成）', () => {
+  world.setDemField(
+    {
+      data: dem.data,
+      meta: dem.meta,
+      osmBuildings: dem.osmBuildings,
+      resolution: dem.resolution,
+      sizeMeters: dem.sizeMeters,
+    },
+    { resolution: DEM_RESOLUTION, ...demTerrainOptions(dem.meta) },
+  )
+})
+check('灌入后高度场就绪', !!world.field())
+check('灌入后尺寸变为真实米制', world.field()?.size === dem.sizeMeters, `size=${world.field()?.size}`)
+check(
+  '灌入后相机远平面覆盖整个场景',
+  camera.far >= dem.sizeMeters * 2,
+  `far=${camera.far} 场景=${dem.sizeMeters}`,
+)
 check('世界实例创建成功', !!world)
 if (!world) {
   console.log('世界创建失败，后续断言跳过')
@@ -203,8 +241,8 @@ check('构造后立即广播了初始状态', callbackLog.stats.length > 0, `cal
 const initialStats = callbackLog.stats.at(-1)
 check('初始状态里三角面数非零', (initialStats?.triangles ?? 0) > 0, `triangles=${initialStats?.triangles}`)
 check('初始状态里树木数非零', (initialStats?.trees ?? 0) > 0, `trees=${initialStats?.trees}`)
-check('初始状态种子正确', initialStats?.seed === 424242, `seed=${initialStats?.seed}`)
-check('初始状态精度正确', initialStats?.resolution === 72, `resolution=${initialStats?.resolution}`)
+// 真实地形没有"换种子"的概念，seed 断言随之移除
+check('初始状态精度正确', initialStats?.resolution === DEM_RESOLUTION, `resolution=${initialStats?.resolution}`)
 
 // ---------- 场景图结构 ----------
 const counts = { mesh: 0, instanced: 0, light: 0, group: 0 }
@@ -223,18 +261,26 @@ check('贴图确实在 canvas 上绘制过', drawCalls.fillRect > 0 && drawCalls
 
 // 地形网格：非索引 + 带顶点色 + 顶点数很大
 let terrainMesh = null
+/**
+ * 地形网格按**名字**定位，不要用"顶点最多的带色非索引网格"这种启发式。
+ *
+ * 曾经能挑对，是因为地形确实是场景里最大的网格。但示意性聚落现在有近 1500 栋，
+ * 顶点数已经超过地形——同一个启发式就悄悄挑错了对象，
+ * 断言随之失败而报的是"统计口径不一致"，把人往错误的方向引。
+ * 名字是唯一稳定的标识。
+ */
 scene.traverse((node) => {
-  if (node.isMesh && node.geometry?.attributes?.color && node.geometry.index === null) {
-    if (!terrainMesh || node.geometry.attributes.position.count > terrainMesh.geometry.attributes.position.count) {
-      terrainMesh = node
-    }
-  }
+  if (node.isMesh && node.name === 'terrain-surface') terrainMesh = node
 })
-check('找到地形网格', !!terrainMesh)
+check('找到地形网格', !!terrainMesh, '按名字 terrain-surface 定位')
 check('地形网格非索引（块面感前提）', terrainMesh?.geometry.index === null)
 
 const stats0 = world.getStats()
-check('统计里的三角面数与非索引几何一致', stats0.triangles === terrainMesh.geometry.attributes.position.count / 3)
+check(
+  '统计里的三角面数与非索引几何一致',
+  stats0.triangles === terrainMesh.geometry.attributes.position.count / 3,
+  `stats=${stats0.triangles} 几何=${terrainMesh.geometry.attributes.position.count / 3}`,
+)
 check('统计里有树', stats0.trees > 0, `trees=${stats0.trees}`)
 check('初始没有标记点', stats0.markerCount === 0)
 
@@ -364,7 +410,7 @@ check('树林几何确有内容', vegetationFaces > 1000, `faces=${vegetationFac
 run('初始取景校验', () => {
   const f = world.field()
   const half = f.size / 2
-  const skirtDepth = f.heightScale * SKIRT_DEPTH_FACTOR
+  const skirtDepth = skirtDepthOf(f.options ?? f)
   const corners = []
   for (const x of [-half, half]) {
     for (const z of [-half, half]) {
@@ -497,10 +543,21 @@ run('定位后跑帧（相机飞行）', () => {
   for (let i = 0; i < 90; i++) world.update(1 / 60, 10 + i / 60)
 })
 
-// ---------- 重建地形 ----------
-run('换 seed 并降精度重建', () => world.rebuild({ seed: 999, resolution: 56 }))
-check('重建后精度已更新', world.getStats().resolution === 56)
-check('重建后标记点被保留', world.getStats().markerCount === 3, `count=${world.getStats().markerCount}`)
+// ---------- 调整精度 ----------
+const camLenBefore = camera.position.length()
+/**
+ * 真实 DEM 只有一张，"换 seed"没有意义（seed 现在是程序化地形的遗留概念）。
+ * 用户能改的是**画面精度**——它走 setResolution，只换几何、不动相机，
+ * 这样调精度时视角不会被重置。
+ */
+run('降低精度', () => world.setResolution(56))
+check('精度已更新', world.getStats().resolution === 56, `resolution=${world.getStats().resolution}`)
+check(
+  '调精度不重置相机',
+  Math.abs(camera.position.length() - camLenBefore) < 1,
+  `调前=${camLenBefore.toFixed(1)} 调后=${camera.position.length().toFixed(1)}`,
+)
+check('调精度后标记点被保留', world.getStats().markerCount === 3, `count=${world.getStats().markerCount}`)
 
 run('重建后标记点重新贴地', () => {
   const newField = world.field()

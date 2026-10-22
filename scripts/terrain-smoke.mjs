@@ -9,7 +9,9 @@
  */
 
 import { hash2, fbm2D, mulberry32, ridgedFbm2D, valueNoise2D } from '../src/three/noise.js'
-import { createHeightField } from '../src/three/heightField.js'
+import { createHeightFieldFromData } from '../src/three/heightField.js'
+import { demTerrainOptions } from '../src/three/demField.js'
+import { loadDemFixtureSync } from './lib/dem-fixture.mjs'
 import { raycastField } from '../src/three/picking.js'
 import { buildTerrainGeometry, pickBand } from '../src/three/terrainMesh.js'
 import { buildRoutePoints, buildRouteRibbon } from '../src/three/route.js'
@@ -75,26 +77,27 @@ for (let i = 0; i < 1000; i++) {
 }
 check('mulberry32 可复现且在 [0,1)', sameSeq)
 
-// ---------- 2. 高度场 ----------
-const opts = { resolution: 65, seed: 123456 }
-const f1 = createHeightField(opts)
-const f2 = createHeightField(opts)
+// ---------- 2. 高度场（真实 DEM）----------
+/**
+ * 高度场现在只来自真实 DEM——程序化噪声生成器（海岛原型）已移除。
+ *
+ * 因此这一段测的是"数据装载与采样契约"，不再是"同 seed 可复现"：
+ *   · 归一化值域必须是 0..1（heightScale / waterLevel / plantable 的阈值全靠它）
+ *   · 元数据与实际数据长度必须自洽
+ *   · 采样连续、格点一致、对角线无缝、世界坐标往返无损
+ */
+const DEM_GRID = 129
+const demFixture = loadDemFixtureSync({ resolution: DEM_GRID })
+const f1 = createHeightFieldFromData(demFixture.data, {
+  resolution: DEM_GRID,
+  size: demFixture.sizeMeters,
+  ...demTerrainOptions(demFixture.meta),
+})
 
-let identical = f1.data.length === f2.data.length
-for (let i = 0; identical && i < f1.data.length; i++) {
-  if (f1.data[i] !== f2.data[i]) identical = false
-}
-check('同 seed 生成逐字节一致的高度场', identical)
-
-const f3 = createHeightField({ resolution: 65, seed: 654321 })
-let differs = false
-for (let i = 0; i < f1.data.length; i++) {
-  if (f1.data[i] !== f3.data[i]) {
-    differs = true
-    break
-  }
-}
-check('不同 seed 生成不同地形', differs)
+check('高度场从 DEM 数据构建成功', !!f1 && f1.resolution === DEM_GRID)
+check('数据长度等于 resolution²', f1.data.length === DEM_GRID * DEM_GRID, `${f1.data.length}`)
+check('世界尺寸来自元数据', f1.size === demFixture.sizeMeters, `size=${f1.size}`)
+check('真实高差已单独留存', f1.options.elevationSpan === demFixture.meta.elevation.span)
 
 let range = true
 let dMin = Infinity
@@ -104,12 +107,22 @@ for (const v of f1.data) {
   if (v < dMin) dMin = v
   if (v > dMax) dMax = v
 }
-check('高度场归一化到 [0,1]', range && near(dMin, 0, 1e-6) && near(dMax, 1, 1e-6), `min=${dMin} max=${dMax}`)
+check('高度场归一化到 [0,1]', range, `min=${dMin.toFixed(4)} max=${dMax.toFixed(4)}`)
+check(
+  '高度场实际跨度接近 1（数据被充分利用）',
+  dMax - dMin > 0.9,
+  `span=${(dMax - dMin).toFixed(4)}`,
+)
 
 // 水位必须落在合理区间，否则整张图要么全淹要么全干
 const above = [...f1.data].filter((v) => v > f1.waterLevel).length
 const landRatio = above / f1.data.length
-check('陆地占比在 25%~85%', landRatio > 0.25 && landRatio < 0.85, `land=${(landRatio * 100).toFixed(1)}%`)
+check('陆地占比在 88%~99%', landRatio > 0.88 && landRatio < 0.99, `land=${(landRatio * 100).toFixed(1)}%`)
+check(
+  '水位高于谷底最低点（否则不会有任何水面）',
+  f1.waterLevel > dMin,
+  `waterLevel=${f1.waterLevel} 最低点=${dMin.toFixed(4)}`,
+)
 
 // 采样连续性：小步长不能出现跳变
 let maxJump = 0
@@ -190,9 +203,16 @@ for (let k = 0; k < 500; k++) {
 check('法线单位长度且朝上', normalOk)
 check('坡度落在 [0,1]', slopeOk)
 
-// 平地专项：把高度场拍平，法线必须是 (0,1,0)、坡度必须是 0
-const flat = createHeightField({ resolution: 33, seed: 1 })
-flat.data.fill(0.5)
+/**
+ * 平地与陡崖专项用**合成数据**直接构造高度场。
+ *
+ * 这两条测的是 normalAt / slopeAt 的纯数学行为，与数据来自 DEM 还是噪声无关，
+ * 所以不该依赖真实高程文件——用常量数组与阶跃数组，判据反而更干净。
+ */
+const SYNTH_GRID = 33
+const synthOpts = { resolution: SYNTH_GRID, size: 1600, heightScale: 355, waterLevel: 0.07, slopeRadius: 1 }
+
+const flat = createHeightFieldFromData(new Float32Array(SYNTH_GRID * SYNTH_GRID).fill(0.5), synthOpts)
 const flatNormal = flat.normalAt(0.4, 0.7)
 check(
   '平地法线为 (0,1,0)',
@@ -202,10 +222,11 @@ check(
 check('平地坡度为 0', near(flat.slopeAt(0.4, 0.7), 0, 1e-9))
 
 // 陡坡专项：造一道垂直落差，法线必须明显偏离竖直方向
-const steep = createHeightField({ resolution: 33, seed: 1 })
-for (let j = 0; j < 33; j++) {
-  for (let i = 0; i < 33; i++) steep.data[j * 33 + i] = i < 17 ? 0 : 1
+const steepData = new Float32Array(SYNTH_GRID * SYNTH_GRID)
+for (let j = 0; j < SYNTH_GRID; j++) {
+  for (let i = 0; i < SYNTH_GRID; i++) steepData[j * SYNTH_GRID + i] = i < 17 ? 0 : 1
 }
+const steep = createHeightFieldFromData(steepData, synthOpts)
 const steepNormal = steep.normalAt(0.5, 0.5)
 check('陡崖法线明显偏离竖直', steepNormal.y < 0.5, `n.y=${steepNormal.y.toFixed(4)}`)
 check('陡崖坡度接近 1', steep.slopeAt(0.5, 0.5) > 0.5, `slope=${steep.slopeAt(0.5, 0.5).toFixed(4)}`)
